@@ -1,17 +1,21 @@
-name: Release APKs
+name: Release APK
 
-# Builds release APKs and publishes them to a GitHub Release so they can be
-# downloaded and installed directly.
+# Builds a single universal release APK and publishes it to a GitHub Release so
+# it can be downloaded and installed directly.
 #
 # Triggers:
 #   * Pushing a "v<major>.<minor>.<patch>" tag  -> publishes a release for that tag.
-#   * Manually via the "Run workflow" button    -> publishes a release for the
+#   * Manually via the "Run workflow" button    -> publishes a pre-release for the
 #     version currently in app/build.gradle, suffixed with the short commit hash.
 #
+# Only the apt-android-7 bootstrap is built, which covers Android 7.0 and newer.
+# Splits are left disabled so a single universal APK is produced that works on
+# every supported ABI.
+#
 # Signing:
-#   If the ANDROID_KEYSTORE_BASE64 secret is configured the APKs are signed with
-#   that keystore. Otherwise they fall back to the public `testkey_untrusted.jks`
-#   checked into this repository, which keeps them installable and keeps them
+#   If the ANDROID_KEYSTORE_BASE64 secret is configured the APK is signed with
+#   that keystore. Otherwise it falls back to the public `testkey_untrusted.jks`
+#   checked into this repository, which keeps it installable and keeps it
 #   signature-compatible with Termux plugin apps (Termux:API, Termux:Widget, ...)
 #   built from upstream sources. See docs/RELEASING.md.
 
@@ -39,60 +43,13 @@ permissions:
   contents: read
 
 jobs:
-  version:
-    name: Resolve version
+  release:
+    name: Build and publish
     runs-on: ubuntu-latest
-    outputs:
-      release_version_name: ${{ steps.resolve.outputs.release_version_name }}
-      apk_version_suffix: ${{ steps.resolve.outputs.apk_version_suffix }}
-    steps:
-      - name: Clone repository
-        uses: actions/checkout@v6
-
-      - name: Resolve version
-        id: resolve
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ "$GITHUB_REF_TYPE" == "tag" ]; then
-            # Tag-driven releases use the tag itself as the version. It carries no
-            # build metadata yet, so the variant is appended as "+<variant>".
-            RELEASE_VERSION_NAME="$GITHUB_REF_NAME"
-            APK_VERSION_SUFFIX="+"
-          else
-            # Manual runs append the commit hash. The "+" keeps semver precedence
-            # intact, and since the version already has a "+<hash>" build metadata
-            # field, the variant is appended to it with a "-" instead.
-            CURRENT_VERSION_NAME_REGEX='\s+versionName "([^"]+)"$'
-            CURRENT_VERSION_NAME="$(grep -m 1 -E "$CURRENT_VERSION_NAME_REGEX" ./app/build.gradle | sed -r "s/$CURRENT_VERSION_NAME_REGEX/\1/")"
-            RELEASE_VERSION_NAME="v$CURRENT_VERSION_NAME+${GITHUB_SHA:0:7}"
-            APK_VERSION_SUFFIX="-"
-          fi
-
-          if ! printf "%s" "${RELEASE_VERSION_NAME/v/}" | grep -qP '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$'; then
-            echo "The versionName '${RELEASE_VERSION_NAME/v/}' is not a valid version as per semantic version '2.0.0' spec in the format 'major.minor.patch(-prerelease)(+buildmetadata)'. https://semver.org/spec/v2.0.0.html." >&2
-            exit 1
-          fi
-
-          {
-            echo "release_version_name=$RELEASE_VERSION_NAME"
-            echo "apk_version_suffix=$APK_VERSION_SUFFIX"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Releasing as '$RELEASE_VERSION_NAME'"
-
-  build:
-    name: Build (${{ matrix.package_variant }})
-    needs: version
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        package_variant: [ apt-android-7, apt-android-5 ]
+    permissions:
+      contents: write
     env:
-      RELEASE_VERSION_NAME: ${{ needs.version.outputs.release_version_name }}
-      APK_VERSION_TAG: ${{ needs.version.outputs.release_version_name }}${{ needs.version.outputs.apk_version_suffix }}${{ matrix.package_variant }}-github-release
+      PACKAGE_VARIANT: apt-android-7
       APK_DIR_PATH: ./app/build/outputs/apk/release
 
     steps:
@@ -114,7 +71,33 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/cpp/bootstrap-*.zip
-          key: bootstraps-${{ matrix.package_variant }}-${{ hashFiles('app/build.gradle') }}
+          key: bootstraps-${{ env.PACKAGE_VARIANT }}-${{ hashFiles('app/build.gradle') }}
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_REF_TYPE" == "tag" ]; then
+            RELEASE_VERSION_NAME="$GITHUB_REF_NAME"
+          else
+            # Manual runs append the commit hash. The "+" keeps semver precedence intact.
+            CURRENT_VERSION_NAME_REGEX='\s+versionName "([^"]+)"$'
+            CURRENT_VERSION_NAME="$(grep -m 1 -E "$CURRENT_VERSION_NAME_REGEX" ./app/build.gradle | sed -r "s/$CURRENT_VERSION_NAME_REGEX/\1/")"
+            RELEASE_VERSION_NAME="v$CURRENT_VERSION_NAME+${GITHUB_SHA:0:7}"
+          fi
+
+          if ! printf "%s" "${RELEASE_VERSION_NAME/v/}" | grep -qP '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$'; then
+            echo "The versionName '${RELEASE_VERSION_NAME/v/}' is not a valid version as per semantic version '2.0.0' spec in the format 'major.minor.patch(-prerelease)(+buildmetadata)'. https://semver.org/spec/v2.0.0.html." >&2
+            exit 1
+          fi
+
+          {
+            echo "RELEASE_VERSION_NAME=$RELEASE_VERSION_NAME"
+            echo "APK_NAME=termux-app_${RELEASE_VERSION_NAME}_universal.apk"
+          } >> "$GITHUB_ENV"
+
+          echo "Releasing as '$RELEASE_VERSION_NAME'"
 
       - name: Decode signing keystore
         env:
@@ -129,82 +112,50 @@ jobs:
             echo "No ANDROID_KEYSTORE_BASE64 secret set; falling back to testkey_untrusted.jks."
           fi
 
-      - name: Build release APKs
+      - name: Build release APK
         shell: bash
         env:
-          TERMUX_PACKAGE_VARIANT: ${{ matrix.package_variant }}
-          TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS: '1'
+          TERMUX_PACKAGE_VARIANT: ${{ env.PACKAGE_VARIANT }}
+          # Left at 0 so a single universal APK is built rather than one per ABI.
+          TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS: '0'
           TERMUX_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           TERMUX_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TERMUX_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}"
-          export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG"
+          export TERMUX_APK_VERSION_TAG="$RELEASE_VERSION_NAME"
           ./gradlew --no-daemon assembleRelease
 
-      - name: Validate and checksum APKs
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
 
-          APK_BASENAME_PREFIX="termux-app_$APK_VERSION_TAG"
-
-          for abi in universal arm64-v8a armeabi-v7a x86_64 x86; do
-            apk="$APK_DIR_PATH/${APK_BASENAME_PREFIX}_$abi.apk"
-            if [ ! -f "$apk" ]; then
-              echo "Failed to find built APK at '$apk'. Files found:" >&2
-              ls -la "$APK_DIR_PATH" >&2
-              exit 1
-            fi
-          done
+          if [ ! -f "$APK_DIR_PATH/$APK_NAME" ]; then
+            echo "Failed to find built APK at '$APK_DIR_PATH/$APK_NAME'. Files found:" >&2
+            ls -la "$APK_DIR_PATH" >&2
+            exit 1
+          fi
 
           # Fail loudly rather than publishing an APK nobody can install.
           apksigner="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
-          "$apksigner" verify --print-certs "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_universal.apk"
+          "$apksigner" verify --print-certs "$APK_DIR_PATH/$APK_NAME"
 
-          (
-            cd "$APK_DIR_PATH"
-            sha256sum \
-              "${APK_BASENAME_PREFIX}_universal.apk" \
-              "${APK_BASENAME_PREFIX}_arm64-v8a.apk" \
-              "${APK_BASENAME_PREFIX}_armeabi-v7a.apk" \
-              "${APK_BASENAME_PREFIX}_x86_64.apk" \
-              "${APK_BASENAME_PREFIX}_x86.apk" \
-              > "${APK_BASENAME_PREFIX}_sha256sums"
-          )
+          echo "APK_SHA256=$(sha256sum "$APK_DIR_PATH/$APK_NAME" | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
-      - name: Upload APKs
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
-          name: release-apks-${{ matrix.package_variant }}
-          path: |
-            ${{ env.APK_DIR_PATH }}/*.apk
-            ${{ env.APK_DIR_PATH }}/*_sha256sums
+          name: ${{ env.APK_NAME }}
+          path: ${{ env.APK_DIR_PATH }}/${{ env.APK_NAME }}
           if-no-files-found: error
           retention-days: 30
-
-  publish:
-    name: Publish GitHub release
-    needs: [ version, build ]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download APKs
-        uses: actions/download-artifact@v6
-        with:
-          pattern: release-apks-*
-          merge-multiple: true
-          path: artifacts
 
       - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.version.outputs.release_version_name }}
           IS_DRAFT: ${{ inputs.draft }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
         run: |
@@ -219,41 +170,32 @@ jobs:
             EXTRA_FLAGS+=(--draft)
           fi
 
-          # Merge every variant's checksums into one file for convenience.
-          cat artifacts/*_sha256sums > artifacts/sha256sums.txt
-
-          cat > release-notes.md <<'NOTES'
+          {
+            cat <<'NOTES'
           ### Install
 
-          Download the APK matching your device and open it to install.
-
-          | Device | APK |
-          | --- | --- |
-          | Most phones and tablets from ~2015 onwards | `arm64-v8a` |
-          | Older / low-end 32-bit ARM devices | `armeabi-v7a` |
-          | Emulators and x86 Chromebooks | `x86_64` |
-          | Not sure | `universal` (works everywhere, larger download) |
-
-          Pick the **`apt-android-7`** build for Android 7.0 and newer. The
-          **`apt-android-5`** build is only for Android 5.0 - 6.0 devices.
-
-          `sha256sums.txt` lists the checksum of every published APK.
+          Download the `.apk` below and open it to install. It works on every
+          supported CPU architecture, on Android 7.0 and newer.
 
           > [!IMPORTANT]
           > Termux and its plugin apps must all be signed with the same key. If you
           > already have Termux installed from another source, uninstall it first,
           > otherwise the install fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
+          **SHA-256**
           NOTES
+            printf '```\n%s  %s\n```\n' "$APK_SHA256" "$APK_NAME"
+          } > release-notes.md
 
           # `gh release create` fails if the release already exists, so upload into
           # the existing one in that case (for example a re-run of the same tag).
-          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" artifacts/*.apk artifacts/sha256sums.txt --clobber
+          if gh release view "$RELEASE_VERSION_NAME" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_VERSION_NAME" "$APK_DIR_PATH/$APK_NAME" --clobber
           else
-            gh release create "$RELEASE_TAG" \
-              --title "$RELEASE_TAG" \
+            gh release create "$RELEASE_VERSION_NAME" \
+              --title "$RELEASE_VERSION_NAME" \
               --notes-file release-notes.md \
               --target "$GITHUB_SHA" \
               "${EXTRA_FLAGS[@]}" \
-              artifacts/*.apk artifacts/sha256sums.txt
+              "$APK_DIR_PATH/$APK_NAME"
           fi

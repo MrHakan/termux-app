@@ -1,10 +1,17 @@
 # Releasing
 
-Release APKs are built and published by the
-[`Release APKs`](../.github/workflows/release.yml) workflow. It builds both
-bootstrap variants (`apt-android-7` and `apt-android-5`), for all four ABIs plus
-a universal APK, verifies the signatures, generates checksums and attaches
-everything to a GitHub Release that users can download from.
+The release APK is built and published by the
+[`Release APK`](../.github/workflows/release.yml) workflow. It builds a single
+universal APK from the `apt-android-7` bootstrap, which works on every supported
+CPU architecture on Android 7.0 and newer, verifies its signature and attaches it
+to a GitHub Release that users can download from. The APK's SHA-256 checksum goes
+into the release notes.
+
+Only one APK is published deliberately: a universal APK removes any need for
+users to work out which ABI their device has, and the `apt-android-5` bootstrap
+(Android 5.0 - 6.0) is not built since it no longer receives package updates
+upstream. To publish it as well, add a `TERMUX_PACKAGE_VARIANT=apt-android-5`
+build to the workflow.
 
 ## Publishing a release
 
@@ -86,5 +93,6 @@ export TERMUX_RELEASE_KEY_PASSWORD=...
 
 Release builds produce a single universal APK by default, because F-Droid does
 not support split APKs ([#1904](https://github.com/termux/termux-app/issues/1904)).
-Set `TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS=1` to get per-ABI APKs as well, which
-is what the release workflow does.
+The release workflow keeps that default. Set
+`TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS=1` if you want per-ABI APKs as well, which
+are smaller but require users to pick the right one.
