@@ -21,6 +21,8 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '17'
+    - name: Setup gradle
+      uses: gradle/actions/setup-gradle@v5
     - name: Execute tests
       run: |
         ./gradlew test
