@@ -27,6 +27,17 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      # The bootstrap archives are ~100 MB each and are pinned by checksum in
+      # app/build.gradle, so they can safely be cached between runs.
+      - name: Cache bootstrap archives
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/cpp/bootstrap-*.zip
+          key: bootstraps-${{ matrix.package_variant }}-${{ hashFiles('app/build.gradle') }}
+
       - name: Build APKs
         shell: bash {0}
         env:
