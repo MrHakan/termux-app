@@ -94,6 +94,8 @@ public class ExtraKeysConstants {
             put("KEYBOARD", "⌨"); // U+2328 ⌨ KEYBOARD not well known but easy to understand
             put("PASTE", "⎘"); // U+2398
             put("SCROLL", "⇳"); // U+21F3
+            put("NEXT_SESSION", "⇄"); // U+21C4 ⇄ RIGHTWARDS ARROW OVER LEFTWARDS ARROW, reads as "switch between"
+            put("NEW_SESSION", "＋"); // U+FF0B ＋ FULLWIDTH PLUS SIGN, monochrome unlike U+2795 which renders as an emoji
         }};
 
         public static final ExtraKeyDisplayMap LESS_KNOWN_CHARACTERS_DISPLAY = new ExtraKeyDisplayMap() {{
@@ -196,6 +198,12 @@ public class ExtraKeysConstants {
         // no alias for HOME
         // no alias for END
 
+        put("NEXTSESSION", "NEXT_SESSION");
+        put("NEXT-SESSION", "NEXT_SESSION");
+        put("NEXT SESSION", "NEXT_SESSION");
+        put("NEWSESSION", "NEW_SESSION");
+        put("NEW-SESSION", "NEW_SESSION");
+        put("NEW SESSION", "NEW_SESSION");
         put("PAGEDOWN", "PGDN");
         put("PAGE_DOWN", "PGDN");
         put("PAGE-DOWN", "PGDN");
