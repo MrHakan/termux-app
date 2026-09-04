@@ -22,6 +22,7 @@ import com.termux.R;
 import com.termux.app.event.SystemEventReceiver;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
 import com.termux.app.terminal.TermuxTerminalSessionServiceClient;
+import com.termux.shared.android.PendingIntentUtils;
 import com.termux.shared.termux.plugins.TermuxPluginUtils;
 import com.termux.shared.data.IntentUtils;
 import com.termux.shared.net.uri.UriUtils;
@@ -784,7 +785,8 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
 
         // Set pending intent to be launched when notification is clicked
         Intent notificationIntent = TermuxActivity.newInstance(this);
-        PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
+        PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent,
+            PendingIntentUtils.getPendingIntentFlags(0));
 
 
         // Set notification text
@@ -827,7 +829,8 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
 
         // Set Exit button action
         Intent exitIntent = new Intent(this, TermuxService.class).setAction(TERMUX_SERVICE.ACTION_STOP_SERVICE);
-        builder.addAction(android.R.drawable.ic_delete, res.getString(R.string.notification_action_exit), PendingIntent.getService(this, 0, exitIntent, 0));
+        builder.addAction(android.R.drawable.ic_delete, res.getString(R.string.notification_action_exit), PendingIntent.getService(this, 0, exitIntent,
+            PendingIntentUtils.getPendingIntentFlags(0)));
 
 
         // Set Wakelock button actions
@@ -835,7 +838,8 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
         Intent toggleWakeLockIntent = new Intent(this, TermuxService.class).setAction(newWakeAction);
         String actionTitle = res.getString(wakeLockHeld ? R.string.notification_action_wake_unlock : R.string.notification_action_wake_lock);
         int actionIcon = wakeLockHeld ? android.R.drawable.ic_lock_idle_lock : android.R.drawable.ic_lock_lock;
-        builder.addAction(actionIcon, actionTitle, PendingIntent.getService(this, 0, toggleWakeLockIntent, 0));
+        builder.addAction(actionIcon, actionTitle, PendingIntent.getService(this, 0, toggleWakeLockIntent,
+            PendingIntentUtils.getPendingIntentFlags(0)));
 
 
         return builder.build();
