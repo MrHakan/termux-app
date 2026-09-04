@@ -10,6 +10,10 @@ ext {
     // by replacing $PREFIX since app code is dependant on the variant used to build the APK.
     // Currently supported values are: [ "apt-android-7" "apt-android-5" ]
     packageVariant = System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7" // Default: "apt-android-7"
+
+    // Path to a keystore to sign release builds with. When unset, release builds fall back to
+    // the `testkey_untrusted.jks` checked into this repository. See docs/RELEASING.md.
+    releaseKeystorePath = System.getenv("TERMUX_RELEASE_KEYSTORE") ?: ""
 }
 
 android {
@@ -23,13 +27,13 @@ android {
     def splitAPKsForReleaseBuilds = System.getenv("TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS") ?: "0" // F-Droid does not support split APKs #1904
 
     dependencies {
-        implementation "androidx.annotation:annotation:1.9.0"
-        implementation "androidx.core:core:1.13.1"
+        implementation "androidx.annotation:annotation:$androidxAnnotationVersion"
+        implementation "androidx.core:core:$androidxCoreVersion"
         implementation "androidx.drawerlayout:drawerlayout:1.2.0"
         implementation "androidx.preference:preference:1.2.1"
         implementation "androidx.viewpager:viewpager:1.0.0"
-        implementation "com.google.android.material:material:1.12.0"
-        implementation "com.google.guava:guava:24.1-jre"
+        implementation "com.google.android.material:material:1.13.0"
+        implementation "com.google.guava:guava:$guavaVersion"
         implementation "io.noties.markwon:core:$markwonVersion"
         implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
         implementation "io.noties.markwon:linkify:$markwonVersion"
@@ -84,6 +88,18 @@ android {
             storePassword 'xrj45yWGLbsO7W0v'
             keyPassword 'xrj45yWGLbsO7W0v'
         }
+
+        // Only configured when a keystore is supplied through the environment, so that
+        // a plain `./gradlew assembleRelease` still works without any local setup.
+        // See docs/RELEASING.md for how to generate one and wire it up in CI.
+        if (releaseKeystorePath) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword System.getenv("TERMUX_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("TERMUX_RELEASE_KEY_ALIAS")
+                keyPassword System.getenv("TERMUX_RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -91,6 +107,13 @@ android {
             minifyEnabled true
             shrinkResources false // Reproducible builds
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+
+            // Without a signing config the release APK is unsigned and cannot be installed at
+            // all. Fall back to the public test key so that release builds stay installable,
+            // and so that they keep the same signature as the Termux plugin apps (Termux:API,
+            // Termux:Widget, ...) built from upstream sources, which is required because they
+            // share a user id with the app.
+            signingConfig releaseKeystorePath ? signingConfigs.release : signingConfigs.debug
         }
 
         debug {
@@ -102,8 +125,8 @@ android {
         // Flag to enable support for the new language APIs
         coreLibraryDesugaringEnabled true
 
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     externalNativeBuild {
