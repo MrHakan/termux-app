@@ -21,6 +21,13 @@ public final class TerminalRenderer {
     final int mTextSize;
     final Typeface mTypeface;
     private final Paint mTextPaint = new Paint();
+    /**
+     * Only used for measuring. {@link #mTextPaint} has its bold, skew and underline state changed
+     * for every run it draws, so measurements taken with it would depend on whatever run came
+     * before. Measuring with an unmodified paint, as {@link #asciiMeasures} always has been, gives
+     * the same answer every time, which is what makes {@link #measureCodePoint} cacheable.
+     */
+    private final Paint mMeasurePaint = new Paint();
 
     /** The width of a single mono spaced character obtained by {@link Paint#measureText(String)} on a single 'X'. */
     final float mFontWidth;
@@ -33,6 +40,22 @@ public final class TerminalRenderer {
 
     private final float[] asciiMeasures = new float[127];
 
+    /**
+     * Widths of non-ASCII code points, cached because {@link Paint#measureText(char[], int, int)}
+     * is a JNI call into text layout and was made for every such cell on every frame. TUIs draw
+     * their borders with box-drawing characters and prompts use powerline glyphs, so a full screen
+     * can easily hold hundreds of them, as does any CJK text.
+     * <p/>
+     * Direct-mapped with {@link #GLYPH_CACHE_SIZE} slots: a colliding code point simply replaces
+     * the previous one, which keeps lookups to a single probe and memory bounded. A renderer is
+     * created per typeface and text size, so entries never go stale. Slot keys of 0 mean empty;
+     * code point 0 is below 127 and so is never looked up here.
+     */
+    private static final int GLYPH_CACHE_BITS = 10;
+    private static final int GLYPH_CACHE_SIZE = 1 << GLYPH_CACHE_BITS;
+    private final int[] mGlyphCacheCodePoints = new int[GLYPH_CACHE_SIZE];
+    private final float[] mGlyphCacheWidths = new float[GLYPH_CACHE_SIZE];
+
     public TerminalRenderer(int textSize, Typeface typeface) {
         mTextSize = textSize;
         mTypeface = typeface;
@@ -40,6 +63,8 @@ public final class TerminalRenderer {
         mTextPaint.setTypeface(typeface);
         mTextPaint.setAntiAlias(true);
         mTextPaint.setTextSize(textSize);
+
+        mMeasurePaint.set(mTextPaint);
 
         mFontLineSpacing = (int) Math.ceil(mTextPaint.getFontSpacing());
         mFontAscent = (int) Math.ceil(mTextPaint.ascent());
@@ -107,8 +132,8 @@ public final class TerminalRenderer {
                 // This could happen for some fonts which are not truly monospace, or for more exotic characters such as
                 // smileys which android font renders as wide.
                 // If this is detected, we draw this code point scaled to match what wcwidth() expects.
-                final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] : mTextPaint.measureText(line,
-                    currentCharIndex, charsForCodePoint);
+                final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] :
+                    measureCodePoint(codePoint, line, currentCharIndex, charsForCodePoint);
                 final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
 
                 if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch) {
@@ -154,6 +179,19 @@ public final class TerminalRenderer {
             drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
                 measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
         }
+    }
+
+    /** The width of a single non-ASCII code point stored at {@code text[index]}, from the cache if possible. */
+    private float measureCodePoint(int codePoint, char[] text, int index, int charCount) {
+        // Fibonacci hashing spreads neighbouring code points (a run of box-drawing characters,
+        // consecutive CJK ideographs) across different slots.
+        final int slot = (codePoint * 0x9E3779B1) >>> (32 - GLYPH_CACHE_BITS);
+        if (mGlyphCacheCodePoints[slot] == codePoint) return mGlyphCacheWidths[slot];
+
+        final float width = mMeasurePaint.measureText(text, index, charCount);
+        mGlyphCacheCodePoints[slot] = codePoint;
+        mGlyphCacheWidths[slot] = width;
+        return width;
     }
 
     private void drawTextRun(Canvas canvas, char[] text, int[] palette, float y, int startColumn, int runWidthColumns,

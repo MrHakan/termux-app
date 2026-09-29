@@ -16,6 +16,7 @@ import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A terminal session, consisting of a process coupled to a terminal interface.
@@ -42,6 +43,14 @@ public final class TerminalSession extends TerminalOutput {
      * terminal emulator.
      */
     final ByteQueue mProcessToTerminalIOQueue = new ByteQueue(64 * 1024);
+    /**
+     * Whether a {@link #MSG_NEW_INPUT} message is already queued on the main thread. The reader
+     * thread only posts a new one when none is pending, since one message reads everything that
+     * {@link #mProcessToTerminalIOQueue} holds. Without this, heavy output (a build log, `cat` of
+     * a large file, scrolling in tmux) posted one message per 4 KB read, and every message after
+     * the first found the queue already empty but still cost a trip through the main looper.
+     */
+    final AtomicBoolean mNewInputPending = new AtomicBoolean();
     /**
      * A queue written to from the main thread due to user interaction, and read by another thread which forwards by
      * writing to the {@link #mTerminalFileDescriptor}.
@@ -139,7 +148,8 @@ public final class TerminalSession extends TerminalOutput {
                         int read = termIn.read(buffer);
                         if (read == -1) return;
                         if (!mProcessToTerminalIOQueue.write(buffer, 0, read)) return;
-                        mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
+                        if (mNewInputPending.compareAndSet(false, true))
+                            mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
                     }
                 } catch (Exception e) {
                     // Ignore, just shutting down.
@@ -340,13 +350,32 @@ public final class TerminalSession extends TerminalOutput {
 
         @Override
         public void handleMessage(Message msg) {
-            int bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false);
-            if (bytesRead > 0) {
-                mEmulator.append(mReceiveBuffer, bytesRead);
-                notifyScreenUpdate();
+            if (msg.what == MSG_NEW_INPUT) {
+                // Clear the flag before reading, so that output queued after this point posts a
+                // new message instead of waiting in the queue for an unrelated one.
+                mNewInputPending.set(false);
+                int bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false);
+                if (bytesRead > 0) {
+                    mEmulator.append(mReceiveBuffer, bytesRead);
+                    notifyScreenUpdate();
+                    // While the buffer is as large as the queue a read always empties it, and the
+                    // reader posts again for anything written after the flag was cleared. Should
+                    // the queue ever be made larger, a full buffer means data written while the
+                    // flag was still set may remain: handle it in a new message rather than a loop
+                    // here, so that input and drawing are not starved by a flooding process.
+                    if (bytesRead == mReceiveBuffer.length && mNewInputPending.compareAndSet(false, true))
+                        sendEmptyMessage(MSG_NEW_INPUT);
+                }
             }
 
             if (msg.what == MSG_PROCESS_EXITED) {
+                // The receive buffer is as large as the queue, so one read takes everything queued.
+                int bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false);
+                if (bytesRead > 0) {
+                    mEmulator.append(mReceiveBuffer, bytesRead);
+                    notifyScreenUpdate();
+                }
+
                 int exitCode = (Integer) msg.obj;
                 cleanupResources(exitCode);
 
