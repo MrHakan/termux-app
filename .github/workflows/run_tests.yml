@@ -8,6 +8,11 @@ on:
     branches:
       - master
 
+# A newer push to the same branch or pull request supersedes the running one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   testing:
     runs-on: ubuntu-latest
@@ -21,6 +26,15 @@ jobs:
         java-version: '17'
     - name: Setup gradle
       uses: gradle/actions/setup-gradle@v5
+    # Compiling the app depends on the bootstrap archives (~100 MB each), so the
+    # tests download them too. They are pinned by checksum in app/build.gradle.
+    - name: Cache bootstrap archives
+      uses: actions/cache@v4
+      with:
+        path: app/src/main/cpp/bootstrap-*.zip
+        key: bootstraps-apt-android-7-${{ hashFiles('app/build.gradle') }}
+    # `test` runs every unit test once per build type. The tests are shared by
+    # both build types, so the release pass only doubled the time.
     - name: Execute tests
       run: |
-        ./gradlew test
+        ./gradlew testDebugUnitTest
