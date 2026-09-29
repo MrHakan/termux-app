@@ -512,6 +512,11 @@ public final class WcWidth {
 
     /** Return the terminal display width of a code point: 0, 1 || 2. */
     public static int width(int ucs) {
+        // Printable ASCII is by far the most common input, and this is called for every character
+        // written to the terminal and again for every cell drawn. Both tables start above 0x7E, so
+        // this returns exactly what the checks below would.
+        if (ucs >= 0x20 && ucs < 0x7F) return 1;
+
         if (ucs == 0 ||
             ucs == 0x034F ||
             (0x200B <= ucs && ucs <= 0x200F) ||

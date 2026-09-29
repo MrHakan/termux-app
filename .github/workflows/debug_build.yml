@@ -9,6 +9,11 @@ on:
     branches:
       - master
 
+# A newer push to the same branch or pull request supersedes the running build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
